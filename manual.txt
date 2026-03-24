@@ -1,0 +1,54 @@
+Para rodar e testar essa aplicação localmente no VS Code antes de colocar online, você precisa seguir alguns passos simples para preparar o seu ambiente Python.
+
+Aqui está o roteiro passo a passo:
+
+1. Preparar a Pasta do Projeto
+Abra o VS Code.
+
+Vá em File > Open Folder e crie uma pasta nova para o projeto (ex: projeto_ras).
+
+Crie um arquivo chamado app.py e cole o código que te passei anteriormente.
+
+Crie um arquivo chamado requirements.txt com o conteúdo:
+
+Plaintext
+streamlit
+pandas
+openpyxl
+xlsxwriter
+2. Criar um Ambiente Virtual (Recomendado)
+Para não bagunçar o seu computador, é melhor criar um ambiente isolado.
+
+Abra o terminal no VS Code (Ctrl + ' ou Terminal > New Terminal).
+
+Digite o comando abaixo:
+
+Bash
+python -m venv venv
+Ative o ambiente:
+
+Windows: .\venv\Scripts\activate
+
+Mac/Linux: source venv/bin/activate
+
+3. Instalar as Bibliotecas
+Com o ambiente ativado (você verá um (venv) escrito no terminal), instale as dependências:
+
+Bash
+pip install -r requirements.txt
+4. Executar o Aplicativo
+Diferente de scripts Python comuns, o Streamlit não deve ser rodado clicando no botão de "Play" do VS Code. Você deve digitar no terminal:
+
+Bash
+streamlit run app.py
+5. O que vai acontecer?
+O terminal mostrará uma URL (geralmente http://localhost:8501).
+
+O seu navegador de internet vai abrir automaticamente com a interface da aplicação.
+
+Agora é só arrastar a sua planilha para dentro do navegador e testar os limites de vagas na barra lateral.
+
+Dicas de Teste no VS Code:
+Edição em tempo real: Se você mudar algo no código do app.py e salvar (Ctrl + S), o navegador mostrará um botão no canto superior direito chamado "Always rerun". Clique nele e você verá as mudanças no site instantaneamente.
+
+Erros de Coluna: Se o código der erro ao subir a planilha, verifique se os nomes das colunas no seu Excel estão exatamente iguais aos que definimos no código (ex: 1º OPÇÃO: ESCOLHA O DIA DO RAS:)
