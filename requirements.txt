@@ -1,4 +1,7 @@
 streamlit
+gspread
 pandas
-openpyxl
-xlsxwriter
+google-api-python-client
+pypdf
+reportlab
+supabase
