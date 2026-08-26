@@ -1,11 +1,12 @@
 import streamlit as st
+import base64
+import fitz  # PyMuPDF
 import pandas as pd
 from zoneinfo import ZoneInfo
 from supabase import create_client
 from datetime import datetime
 import hashlib
 import time
-import base64
 from io import BytesIO
 
 from pypdf import PdfReader, PdfWriter
@@ -79,7 +80,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">📅 Sistema de Escalas | GCMCF</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Download de escalas.</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Visualização protegida das escalas de serviço.</div>', unsafe_allow_html=True)
 
 # =====================================================
 # FUNÇÕES DE SEGURANÇA E SESSÃO
@@ -275,6 +276,240 @@ def criar_pdf_marca_dagua(matricula):
     buffer.seek(0)
     return buffer
 
+
+def pdf_para_imagens(pdf_bytes, matricula, dpi=150):
+    """
+    Converte cada página do PDF em PNG em memória.
+    A imagem recebe uma marca d'água identificável pelo usuário.
+    Não cria arquivo temporário no servidor.
+    """
+    imagens = []
+
+    try:
+        documento = fitz.open(stream=pdf_bytes, filetype="pdf")
+        escala = dpi / 72
+
+        for numero, pagina in enumerate(documento):
+            pix = pagina.get_pixmap(
+                matrix=fitz.Matrix(escala, escala),
+                alpha=False
+            )
+            imagens.append(pix.tobytes("png"))
+
+        documento.close()
+        return imagens
+
+    except Exception as e:
+        st.error(f"Erro ao converter a escala para imagem: {e}")
+        return []
+
+
+def visualizar_imagem_protegida(imagem_bytes, matricula, nome_escala):
+    """
+    Mostra a imagem somente após o clique em 'Visualizar Escala'.
+
+    Observação:
+    nenhum navegador permite bloquear 100% capturas feitas pelo
+    sistema operacional. Esta camada bloqueia ações comuns do navegador
+    e evita disponibilizar o PDF original ao usuário.
+    """
+    imagem_b64 = base64.b64encode(imagem_bytes).decode("utf-8")
+
+    html = f"""
+    <style>
+        * {{
+            box-sizing: border-box;
+        }}
+
+        html, body {{
+            margin: 0;
+            padding: 0;
+            background: #111827;
+            user-select: none !important;
+            -webkit-user-select: none !important;
+            -webkit-touch-callout: none !important;
+            overflow-x: hidden;
+        }}
+
+        .viewer {{
+            position: relative;
+            width: 100%;
+            background: #111827;
+            padding: 12px;
+            border-radius: 12px;
+            overflow: hidden;
+            text-align: center;
+        }}
+
+        .viewer-header {{
+            color: #fff;
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+            padding: 8px;
+            opacity: .9;
+        }}
+
+        .image-area {{
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
+            overflow: hidden;
+            background: #fff;
+            line-height: 0;
+        }}
+
+        .image-area img {{
+            display: block;
+            width: 100%;
+            height: auto;
+            max-height: 1100px;
+            object-fit: contain;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-drag: none;
+        }}
+
+        .protection-layer {{
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            background: transparent;
+            cursor: default;
+        }}
+
+        .watermark {{
+            position: absolute;
+            inset: 0;
+            z-index: 8;
+            pointer-events: none;
+            overflow: hidden;
+            opacity: .22;
+            background-image:
+                repeating-linear-gradient(
+                    -35deg,
+                    transparent 0px,
+                    transparent 90px,
+                    rgba(0,0,0,.20) 91px,
+                    rgba(0,0,0,.20) 93px,
+                    transparent 94px,
+                    transparent 180px
+                );
+        }}
+
+        .watermark-text {{
+            position: absolute;
+            top: 45%;
+            left: 0;
+            width: 100%;
+            transform: rotate(-35deg);
+            font-family: Arial, sans-serif;
+            font-weight: 900;
+            font-size: clamp(18px, 3vw, 42px);
+            color: #111827;
+            letter-spacing: 3px;
+            white-space: nowrap;
+        }}
+
+        .notice {{
+            margin-top: 10px;
+            color: #f9fafb;
+            font: 12px Arial, sans-serif;
+            opacity: .8;
+        }}
+
+        @media print {{
+            body {{
+                display: none !important;
+            }}
+        }}
+    </style>
+
+    <div class="viewer"
+         oncontextmenu="return false"
+         ondragstart="return false"
+         onselectstart="return false">
+
+        <div class="viewer-header">
+            🔒 Visualização protegida — {nome_escala}
+        </div>
+
+        <div class="image-area">
+            <img
+                src="data:image/png;base64,{imagem_b64}"
+                alt="Escala de serviço"
+                draggable="false"
+            >
+
+            <div class="watermark">
+                <div class="watermark-text">
+                    USO RESTRITO • MATRÍCULA {matricula}
+                    • {matricula} • USO RESTRITO
+                </div>
+            </div>
+
+            <div class="protection-layer"></div>
+        </div>
+
+        <div class="notice">
+            Matrícula vinculada à visualização: <strong>{matricula}</strong>
+            <br>
+            Documento de uso restrito. Não autorizado copiar, reproduzir ou compartilhar.
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("contextmenu", function(e) {{
+            e.preventDefault();
+        }}, true);
+
+        document.addEventListener("dragstart", function(e) {{
+            e.preventDefault();
+        }}, true);
+
+        document.addEventListener("selectstart", function(e) {{
+            e.preventDefault();
+        }}, true);
+
+        document.addEventListener("keydown", function(e) {{
+            const key = String(e.key).toLowerCase();
+
+            if (
+                e.key === "PrintScreen" ||
+                (e.ctrlKey && ["p", "s", "u", "c"].includes(key)) ||
+                (e.metaKey && ["p", "s", "u", "c"].includes(key)) ||
+                (e.ctrlKey && e.shiftKey && ["i", "j", "s"].includes(key)) ||
+                e.key === "F12"
+            ) {{
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            }}
+        }}, true);
+
+        window.addEventListener("beforeprint", function() {{
+            document.body.innerHTML = "";
+        }});
+
+        // Dificulta ações de captura via menu/gestos dentro do componente.
+        document.addEventListener("touchstart", function(e) {{
+            if (e.touches.length > 1) {{
+                e.preventDefault();
+            }}
+        }}, {{passive:false}});
+
+        document.addEventListener("gesturestart", function(e) {{
+            e.preventDefault();
+        }});
+    </script>
+    """
+
+    st.components.v1.html(
+        html,
+        height=1200,
+        scrolling=True
+    )
+
+
 def aplicar_marca_dagua(pdf_original_bytes, matricula):
     try:
         pdf_original = PdfReader(BytesIO(pdf_original_bytes))
@@ -293,54 +528,6 @@ def aplicar_marca_dagua(pdf_original_bytes, matricula):
     except Exception as e:
         st.error(f"Erro ao processar marca d'água no PDF: {e}")
         return pdf_original_bytes
-
-
-
-
-
-# =====================================================
-# FUNÇÃO VISUALIZAR PDF EM TELA
-# =====================================================
-
-def visualizar_pdf(pdf_bytes, altura=850):
-    """
-    Exibe um PDF diretamente na página do Streamlit.
-    Não utiliza st.download_button().
-    """
-    if not pdf_bytes:
-        st.error("Não foi possível carregar a escala.")
-        return
-
-    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-
-    pdf_html = f"""
-    <div style="
-        width: 100%;
-        background: #e5e7eb;
-        padding: 10px;
-        border-radius: 10px;
-        box-sizing: border-box;
-    ">
-        <iframe
-            src="data:application/pdf;base64,{pdf_base64}#toolbar=0&navpanes=0&scrollbar=1"
-            width="100%"
-            height="{altura}px"
-            style="
-                border: 1px solid #d1d5db;
-                border-radius: 8px;
-                background: white;
-            "
-        ></iframe>
-    </div>
-    """
-
-    st.components.v1.html(
-        pdf_html,
-        height=altura + 30,
-        scrolling=False
-    )
-
-
 
 # =====================================================
 # ENGINE DE COMUNICAÇÃO (SUPABASE STORAGE)
@@ -507,10 +694,6 @@ def view_visualizar_escala_usuario():
         "SEM_MATRICULA"
     ).upper()
 
-    # =====================================================
-    # FILTROS
-    # =====================================================
-
     col_mes, col_ano = st.columns([2, 1])
 
     with col_mes:
@@ -530,12 +713,6 @@ def view_visualizar_escala_usuario():
 
     st.markdown("---")
 
-    # =====================================================
-    # ESCALAS
-    # =====================================================
-
-    escalas_encontradas = 0
-
     for nome_exibicao, prefixo in ESCALAS_DISPONIVEIS.items():
 
         nome_arquivo_target = gerar_nome_arquivo(
@@ -544,136 +721,101 @@ def view_visualizar_escala_usuario():
             ano_desejado
         )
 
-        pdf_original = baixar_escala_original(
-            nome_arquivo_target
+        # Não baixa/converte a escala até o usuário solicitar a visualização.
+        chave_visualizacao = (
+            f"visualizar_{prefixo}_{mes_desejado}_{ano_desejado}"
         )
-
-        # =================================================
-        # ESCALA NÃO PUBLICADA
-        # =================================================
-
-        if not pdf_original:
-
-            with st.container(border=True):
-
-                col1, col2 = st.columns([5, 1])
-
-                with col1:
-                    st.markdown(
-                        f"### 📋 {nome_exibicao}"
-                    )
-
-                    st.caption(
-                        f"{mes_desejado} de {ano_desejado}"
-                    )
-
-                with col2:
-                    st.warning("Não publicada")
-
-            continue
-
-        # =================================================
-        # ESCALA ENCONTRADA
-        # =================================================
-
-        escalas_encontradas += 1
-
-        # Aplica a marca d'água com a matrícula
-        pdf_com_marca = aplicar_marca_dagua(
-            pdf_original,
-            matricula
-        )
-
-        # =================================================
-        # CABEÇALHO DA ESCALA
-        # =================================================
 
         with st.container(border=True):
 
-            st.markdown(
-                f"""
-                <div style="
-                    display:flex;
-                    justify-content:space-between;
-                    align-items:center;
-                    margin-bottom:10px;
-                ">
+            col_info, col_acao = st.columns([4, 1])
 
-                    <div>
-                        <div style="
-                            font-size:1.35rem;
-                            font-weight:700;
-                            color:#1e3a8a;
-                        ">
-                            📋 Escala do {nome_exibicao}
-                        </div>
+            with col_info:
+                st.markdown(
+                    f"### 📋 {nome_exibicao}"
+                )
 
-                        <div style="
-                            color:#6b7280;
-                            margin-top:4px;
-                        ">
-                            Período: <strong>
-                            {mes_desejado}/{ano_desejado}
-                            </strong>
-                        </div>
-                    </div>
+                st.caption(
+                    f"Período: {mes_desejado}/{ano_desejado}"
+                )
 
-                    <div style="
-                        background:#eff6ff;
-                        color:#1e40af;
-                        padding:6px 12px;
-                        border-radius:20px;
-                        font-size:0.85rem;
-                        font-weight:600;
-                    ">
-                        👤 {matricula}
-                    </div>
+            with col_acao:
+                visualizar = st.button(
+                    "👁️ Visualizar Escala",
+                    key=chave_visualizacao,
+                    use_container_width=True
+                )
 
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+            if visualizar:
 
-            st.info(
-                "👁️ Esta escala está disponível para "
-                "visualização diretamente no sistema."
-            )
+                with st.spinner("Preparando visualização protegida..."):
 
-            # =================================================
-            # VISUALIZAÇÃO DO PDF
-            # =================================================
+                    pdf_original = baixar_escala_original(
+                        nome_arquivo_target
+                    )
 
-            visualizar_pdf(
-                pdf_com_marca,
-                altura=850
-            )
+                    if pdf_original:
 
-        # =================================================
-        # LOG DE VISUALIZAÇÃO
-        # =================================================
+                        # Mantém a proteção existente do sistema.
+                        pdf_com_marca = aplicar_marca_dagua(
+                            pdf_original,
+                            matricula
+                        )
 
-        registrar_log(
-            st.session_state["nome_usuario"],
-            "VISUALIZACAO_ESCALA",
-            (
-                f"{nome_arquivo_target} | "
-                f"Matrícula: {matricula}"
-            )
-        )
+                        imagens = pdf_para_imagens(
+                            pdf_com_marca,
+                            matricula,
+                            dpi=150
+                        )
+
+                        if imagens:
+
+                            registrar_log(
+                                st.session_state["nome_usuario"],
+                                "VISUALIZACAO_ESCALA",
+                                (
+                                    f"{nome_arquivo_target} | "
+                                    f"Matrícula: {matricula}"
+                                )
+                            )
+
+                            st.success(
+                                "Escala carregada para visualização."
+                            )
+
+                            st.warning(
+                                "🔒 Visualização protegida. "
+                                "O PDF original não é disponibilizado "
+                                "para download."
+                            )
+
+                            for indice, imagem in enumerate(imagens, 1):
+
+                                if len(imagens) > 1:
+                                    st.markdown(
+                                        f"#### Página {indice} de {len(imagens)}"
+                                    )
+
+                                visualizar_imagem_protegida(
+                                    imagem,
+                                    matricula,
+                                    nome_exibicao
+                                )
+
+                        else:
+                            st.error(
+                                "Não foi possível gerar a imagem da escala."
+                            )
+
+                    else:
+                        st.warning(
+                            f"⚠️ A escala do {nome_exibicao} "
+                            f"para {mes_desejado}/{ano_desejado} "
+                            f"ainda não foi publicada."
+                        )
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-    # =====================================================
-    # NENHUMA ESCALA
-    # =====================================================
-
-    if escalas_encontradas == 0:
-
-        st.warning(
-            f"⚠️ Nenhuma escala foi publicada para "
-            f"{mes_desejado}/{ano_desejado}."
-        )
-        
 # =====================================================
 # RENDERIZAÇÃO E CONTROLE DE TELAS
 # =====================================================
